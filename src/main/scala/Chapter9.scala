@@ -41,6 +41,23 @@ object Chapter9 {
     def numWithChars(n: Int, c: Char): Parser[List[Char]] =
       regex("\\d+".r).flatMap(x => listOfN(x.toInt, char(c)))
 
+    def ws: Parser[String] = regex("\\s+".r)
+
+    def digits: Parser[Int] = regex("\\d+".r).map(_.toInt)
+
+    def delimList[A,B](delim: Parser[A], p: Parser[B]): Parser[List[B]] = {
+      def rest = map2(delim, p)((_, v) => v).many
+
+      map2(p, rest)((a, b) => a :: b) | succeed(Nil)
+    }
+
+    def __ws[A](p: Parser[A]): Parser[A] =
+      for {
+        _ <- ws.many
+        v <- p
+        _ <- ws.many
+      } yield v
+
     case class ParserOps[A](p: Parser[A]) {
       def |[B >: A](p2: Parser[B]): Parser[B] = self.or(p, p2)
       def or[B >: A](p2: => Parser[B]): Parser[B] = self.or(p, p2)
@@ -68,5 +85,83 @@ object Chapter9 {
     def __null: Parser[JNull.type] = string("null") map (_ => JNull)
     def boolTrue: Parser[JBool] = string("true") map (_ => JBool(true))
     def boolFalse: Parser[JBool] = string("false") map (_ => JBool(false))
+
+    def digits19: Parser[Int] = regex("[1-9]\\d*".r).map(_.toInt)
+
+    def exponent: Parser[Int] = for {
+      _ <- (char('e') | char('E'))
+      sign <- expSign
+      e <- digits
+    } yield sign*e
+
+    def expSign: Parser[Int] = char('+').map(_ => 1) | char('-').map(_ => -1) | succeed(1)
+
+    private def toDouble(num: Int, frac: Int): Double = (num.toString + "." + frac.toString).toDouble
+
+    def number: Parser[JNumber] = {
+      for {
+          sign <- char('-').map(_ => -1) | succeed(1)
+          num <- char('0').map(_ => 0) | digits19
+          _ <- char('.')
+          frac <- digits | succeed(0)
+          exp <- exponent | succeed(1)
+      } yield JNumber(math.pow(sign.toDouble * toDouble(num, frac), exp))
+    }
+
+    def __object: Parser[JObject] = {
+      for {
+        _ <- char('{')
+        parts <- delimList(char(','), field)
+        _ <- char('}')
+      } yield JObject(parts.toMap)
+    }
+
+    def field: Parser[(String, JSON)] = {
+      for {
+        k <- __ws(__string)
+        _ <- char(':')
+        v <- __ws(value)
+      } yield k -> v
+    }
+
+    def array: Parser[JArray] = {
+      for {
+        _ <- char('[')
+        parts <- delimList(char(','), __ws(value))
+        _ <- char(']')
+      } yield JArray(parts.toIndexedSeq)
+    }
+
+    def value: Parser[JSON] =
+      string | number | __object | array | boolTrue | boolFalse | __null
+
+    def __string: Parser[String] = {
+      for {
+        _ <- char('\"')
+        parts <- (stringChars | stringEscape).many
+        _ <- char('\"')
+      } yield {
+        parts.mkString
+      }
+    }
+
+    def string: Parser[JString] = __string.map(JString(_))
+
+    def stringChars: Parser[String] = regex("""[^\"]+""".r)
+
+    def stringEscape: Parser[String] =
+      for {
+        _ <- char('\\')
+        c <- stringEscapeChar
+      } yield c.toString
+
+    def unicodeChar: Parser[Char] = regex("u[a-fA-F0-9]{4}".r).map(s =>
+      java.lang.Integer.parseInt(s.substring(1), 16).toChar)
+
+    def stringEscapeChar: Parser[Char] =
+      char('"') | char('\\') | char('/') |
+        char('b').map(_ => '\b') | char('b').map(_ => '\f') |
+        char('n').map(_ => '\n') | char('r').map(_ => '\r') |
+        char('t').map(_ => '\t') | unicodeChar
   }
 }

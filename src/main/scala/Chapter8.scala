@@ -88,55 +88,56 @@ object Chapter8 {
   case class Falsified(failure: FailedCase, successes: SuccessCount) extends Result {
     def isFalsified = true
   }
+
+  case class Gen[+A](sample: State[RNG,A]) {
+    def flatMap[B](f: A => Gen[B]): Gen[B] =
+      Gen(sample.flatMap(a => f(a).sample))
+
+    def map[B](f: A => B): Gen[B] =
+      Gen(sample.map(a => f(a)))
+
+    def listOfN(size: Gen[Int]): Gen[List[A]] =
+      size.flatMap(s => Gen.listOfN(s, this))
+
+    def union[A](g1: Gen[A], g2: Gen[A]): Gen[A] =
+      Gen.boolean.flatMap(tf => if (tf) g1 else g2)
+
+    def unsized: SGen[A] = SGen(_ => this)
+  }
+
+  case class SGen[+A](forSize: Int => Gen[A]) {
+    def flatMap[B](f: A => SGen[B]): SGen[B] =
+      SGen(i => forSize(i).flatMap(a => f(a).forSize(i)))
+
+    def listOfN(size: SGen[Int]): SGen[List[A]] =
+      SGen(i => forSize(i).listOfN(size.forSize(i)))
+
+    def union[A](g1: SGen[A], g2: SGen[A]): SGen[A] =
+      Gen.boolean.unsized.flatMap(tf => if (tf) g1 else g2)
+  }
+
+  object Gen {
+    def choose(start: Int, stopExclusive: Int): Gen[Int] =
+      Gen(nonNegativeLessThan2(stopExclusive-start).map(_ + start))
+
+    def unit[A](a: => A): Gen[A] = Gen(State.unit(a))
+
+    def boolean: Gen[Boolean] = Gen(int.map(_ % 2 == 0))
+
+    def listOfN[A](n: Int, g: Gen[A]): Gen[List[A]] =
+      Gen(State.sequence(List.fill(n)(g.sample)))
+
+    def listOf[A](g: Gen[A]): SGen[List[A]] =
+      SGen(i => listOfN(i, g))
+
+    def listOf1[A](g: Gen[A]) =
+      SGen(i => listOf(g).forSize(i+1))
+
+    def pair[A](g: Gen[A]): Gen[(A, A)] = Gen(g.sample.map2(g.sample)((_, _)))
+
+    def string(n: Int): Gen[String] =
+      Gen(listOfN(n, choose('A', 'Z')).sample.map(
+        a => new String(a.map(_.toChar).toArray)))
+  }
 }
 
-case class Gen[+A](sample: State[RNG,A]) {
-  def flatMap[B](f: A => Gen[B]): Gen[B] =
-    Gen(sample.flatMap(a => f(a).sample))
-
-  def map[B](f: A => B): Gen[B] =
-    Gen(sample.map(a => f(a)))
-
-  def listOfN(size: Gen[Int]): Gen[List[A]] =
-    size.flatMap(s => Gen.listOfN(s, this))
-
-  def union[A](g1: Gen[A], g2: Gen[A]): Gen[A] =
-    Gen.boolean.flatMap(tf => if (tf) g1 else g2)
-
-  def unsized: SGen[A] = SGen(_ => this)
-}
-
-case class SGen[+A](forSize: Int => Gen[A]) {
-  def flatMap[B](f: A => SGen[B]): SGen[B] =
-    SGen(i => forSize(i).flatMap(a => f(a).forSize(i)))
-
-  def listOfN(size: SGen[Int]): SGen[List[A]] =
-    SGen(i => forSize(i).listOfN(size.forSize(i)))
-
-  def union[A](g1: SGen[A], g2: SGen[A]): SGen[A] =
-    Gen.boolean.unsized.flatMap(tf => if (tf) g1 else g2)
-}
-
-object Gen {
-  def choose(start: Int, stopExclusive: Int): Gen[Int] =
-    Gen(nonNegativeLessThan2(stopExclusive-start).map(_ + start))
-
-  def unit[A](a: => A): Gen[A] = Gen(State.unit(a))
-
-  def boolean: Gen[Boolean] = Gen(int.map(_ % 2 == 0))
-
-  def listOfN[A](n: Int, g: Gen[A]): Gen[List[A]] =
-    Gen(State.sequence(List.fill(n)(g.sample)))
-
-  def listOf[A](g: Gen[A]): SGen[List[A]] =
-    SGen(i => listOfN(i, g))
-
-  def listOf1[A](g: Gen[A]) =
-    SGen(i => listOf(g).forSize(i+1))
-
-  def pair[A](g: Gen[A]): Gen[(A, A)] = Gen(g.sample.map2(g.sample)((_, _)))
-
-  def string(n: Int): Gen[String] =
-    Gen(listOfN(n, choose('A', 'Z')).sample.map(
-      a => new String(a.map(_.toChar).toArray)))
-}
