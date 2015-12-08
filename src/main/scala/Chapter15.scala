@@ -1,5 +1,11 @@
+import Chapter11._
+
 object Chapter15 {
   sealed trait Process[I,O] {
+    import Process._
+
+    val M = monad[I]
+
     def apply(s: Stream[I]): Stream[O] = this match {
       case Halt() => Stream()
       case Await(recv) => s match {
@@ -7,6 +13,18 @@ object Chapter15 {
         case xs => recv(None)(xs)
       }
       case Emit(h,t) => h #:: t(s)
+    }
+
+    def ++(p: => Process[I,O]): Process[I,O] = this match {
+      case Halt() => p
+      case Emit(h, t) => Emit(h, t ++ p)
+      case Await(recv) => Await(recv andThen (_ ++ p))
+    }
+
+    def flatMap[O2](f: O => Process[I,O2]): Process[I,O2] = this match {
+      case Halt() => Halt()
+      case Emit(h, t) => f(h) ++ t.flatMap(f)
+      case Await(recv) => Await(recv andThen (_ flatMap f))
     }
 
     def repeat: Process[I,O] = {
@@ -21,7 +39,7 @@ object Chapter15 {
       go(this)
     }
 
-    def |>[O2](p2: Process[O,O2]): Process[I,O2] = {
+    def |>>>>[O2](p2: Process[O,O2]): Process[I,O2] = {
       (this, p2) match {
         case (Halt(), _) | (_, Halt()) => Halt()
         case (_, Emit(o2,t2)) => Emit(o2, this |> t2)
@@ -29,9 +47,38 @@ object Chapter15 {
         case (Await(recv), _) => Await(i => recv(i) |> p2)
       }
     }
+
+
+   // Correct answer (my answer didn't handle Halt() on this correctly)
+   /*
+    * Exercise 5: Implement `|>`. Let the types guide your implementation.
+    */
+    def |>[O2](p2: Process[O,O2]): Process[I,O2] = {
+      p2 match {
+        case Halt() => Halt()
+        case Emit(h,t) => Emit(h, this |> t)
+        case Await(f) => this match {
+          case Emit(h,t) => t |> f(Some(h))
+          case Halt() => Halt() |> f(None)
+          case Await(g) => Await((i: Option[I]) => g(i) |> p2)
+        }
+      }
+    }
+
+    def map[O2](f: O => O2): Process[I,O2] = this |> lift(f)
+
+    def zipWithIndex: Process[I,(O,Int)] = M.product(this,count)
   }
 
   object Process {
+    implicit def monad[I]: Monad[({ type f[x] = Process[I,x] })#f] =
+      new Monad[({ type f[x] = Process[I,x] })#f] {
+        def unit[O](o: => O): Process[I,O] = Emit(o)
+        def flatMap[O,O2](p: Process[I,O])(
+            f: O => Process[I,O2]): Process[I,O2] =
+          p flatMap f
+      }
+
     def liftOne[I,O](f: I => O): Process[I,O] =
       Await {
         case Some(i) => Emit(f(i))
@@ -64,7 +111,7 @@ object Chapter15 {
           case None => Halt()
         }
       }
-      loop(0)
+      loop(1)
     }
 
     def mean: Process[Double,Double] = {

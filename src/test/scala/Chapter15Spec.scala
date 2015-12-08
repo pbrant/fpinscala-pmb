@@ -45,7 +45,7 @@ class Chapter15Spec extends FlatSpec with Matchers {
   }
 
   "count(Stream(1,2,3,4)).toList" should "be List(1,2,3,4)" in {
-    count(Stream(1,2,3,4)).toList should be (List(0,1,2,3))
+    count(Stream(1,2,3,4)).toList should be (List(1,2,3,4))
   }
 
   "count1(Stream(1,2,3,4)).toList" should "be List(1,2,3,4)" in {
